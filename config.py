@@ -21,26 +21,28 @@ GRID_SIZE = 128  # wafer-map 해상도 (128x128)
 GRID_HEIGHT = GRID_SIZE
 GRID_WIDTH = GRID_SIZE
 
-# 패턴 분류 클래스
+# 패턴 분류 클래스 (실제 데이터셋에 있는 패턴만 포함)
 PATTERN_CLASSES = [
     "local",
+    "center",      # Center 패턴 추가
     "edge-local",
     "donut",
     "edge-ring",
     "scratch",
-    "near-full",
-    "none"
+    "near-full",   # 박스 라벨링 불필요 (이미지 분류)
+    "none"         # 박스 라벨링 불필요 (이미지 분류)
 ]
 
 # 시각화 설정
 VIS_COLORS = {
     "local": (0, 255, 0),          # 녹색
+    "center": (0, 255, 255),       # 청록색 (Center 패턴)
     "edge-local": (255, 165, 0),   # 주황색
     "donut": (255, 0, 255),        # 자홍색
     "edge-ring": (0, 255, 255),    # 청록색
     "scratch": (255, 0, 0),        # 빨간색
-    "near-full": (128, 0, 128),    # 보라색
-    "none": (128, 128, 128)        # 회색
+    "near-full": (128, 0, 128),    # 보라색 (박스 라벨링 불필요)
+    "none": (128, 128, 128)        # 회색 (박스 라벨링 불필요)
 }
 
 # YOLO 검출 임계값

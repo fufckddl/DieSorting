@@ -105,6 +105,7 @@ class MainWindow(QMainWindow):
                 border: 1px solid #555555;
                 padding: 5px;
                 color: #ffffff;
+                min-width: 200px;
             }
             QPushButton {
                 background-color: #4a4a4a;
@@ -151,30 +152,35 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("파일명:"))
         self.filename_edit = QLineEdit()
         self.filename_edit.setReadOnly(True)
+        self.filename_edit.setMinimumWidth(200)  # 최소 너비 설정
         layout.addWidget(self.filename_edit)
         
         # 분석 시간
         layout.addWidget(QLabel("분석 시간:"))
         self.analysis_time_edit = QLineEdit()
         self.analysis_time_edit.setReadOnly(True)
+        self.analysis_time_edit.setMinimumWidth(200)
         layout.addWidget(self.analysis_time_edit)
         
         # 이미지 크기
         layout.addWidget(QLabel("이미지 크기:"))
         self.image_size_edit = QLineEdit()
         self.image_size_edit.setReadOnly(True)
+        self.image_size_edit.setMinimumWidth(200)
         layout.addWidget(self.image_size_edit)
         
         # 패턴 분류 결과
         layout.addWidget(QLabel("분류된 패턴:"))
         self.pattern_edit = QLineEdit()
         self.pattern_edit.setReadOnly(True)
+        self.pattern_edit.setMinimumWidth(200)
         layout.addWidget(self.pattern_edit)
         
         # 패턴 신뢰도
         layout.addWidget(QLabel("신뢰도:"))
         self.confidence_edit = QLineEdit()
         self.confidence_edit.setReadOnly(True)
+        self.confidence_edit.setMinimumWidth(200)
         layout.addWidget(self.confidence_edit)
         
         # 분석 시작 버튼
@@ -225,7 +231,7 @@ class MainWindow(QMainWindow):
         
         # 리셋 버튼
         reset_btn = QPushButton("Reset")
-        reset_btn.setFixedSize(40, 40)
+        reset_btn.setFixedSize(50, 40)  # 너비 증가하여 텍스트가 잘리지 않도록
         reset_btn.clicked.connect(self.reset_zoom)
         button_layout.addWidget(reset_btn)
         
@@ -263,11 +269,12 @@ class MainWindow(QMainWindow):
         # 패턴 정보를 표시할 텍스트 영역
         self.pattern_info_text = QLabel("분석 전")
         self.pattern_info_text.setWordWrap(True)
+        self.pattern_info_text.setMinimumHeight(150)  # 최소 높이 설정
         self.pattern_info_text.setStyleSheet("""
             QLabel {
                 background-color: #3c3c3c;
                 border: 1px solid #555555;
-                padding: 5px;
+                padding: 8px;
                 border-radius: 3px;
             }
         """)
@@ -291,9 +298,14 @@ class MainWindow(QMainWindow):
         self.detail_table = QTableWidget()
         self.detail_table.setColumnCount(3)
         self.detail_table.setHorizontalHeaderLabels(["Defect Type", "Position (X,Y)", "Confidence"])
-        self.detail_table.setColumnWidth(0, 150)
-        self.detail_table.setColumnWidth(1, 150)
-        self.detail_table.setColumnWidth(2, 100)
+        # 컬럼 너비 조정 (텍스트가 잘리지 않도록)
+        self.detail_table.setColumnWidth(0, 180)  # Defect Type
+        self.detail_table.setColumnWidth(1, 180)  # Position
+        self.detail_table.setColumnWidth(2, 120)  # Confidence
+        # 테이블이 컬럼 너비를 자동 조정하도록 설정
+        self.detail_table.horizontalHeader().setStretchLastSection(True)
+        # 텍스트가 잘리지 않도록 설정
+        self.detail_table.setTextElideMode(Qt.ElideNone)
         layout.addWidget(self.detail_table)
         
         return panel
@@ -353,7 +365,7 @@ class MainWindow(QMainWindow):
             self.zoom_factor = 1.0
     
     def display_image(self, image: np.ndarray, reset_zoom: bool = False):
-        """이미지를 QLabel에 표시"""
+        """이미지를 QLabel에 표시 (작은 이미지는 640x640으로 확대)"""
         if reset_zoom:
             self.zoom_factor = 1.0
         
@@ -364,6 +376,12 @@ class MainWindow(QMainWindow):
             rgb_image = image
         
         h, w = rgb_image.shape[:2]
+        
+        # 이미지를 150x150으로 리사이즈 (pipeline에서 이미 150x150으로 생성되지만, 원본 이미지 미리보기용으로 유지)
+        if w != 150 or h != 150:
+            # 정확히 150x150으로 리사이즈
+            rgb_image = cv2.resize(rgb_image, (150, 150), interpolation=cv2.INTER_CUBIC)
+            h, w = 150, 150
         
         # 확대/축소 적용
         if self.zoom_factor != 1.0:
@@ -480,14 +498,12 @@ class MainWindow(QMainWindow):
             
             # 확률 내림차순 정렬
             sorted_probs = sorted(pattern_probs.items(), key=lambda x: x[1], reverse=True)
-            for i, (pattern, prob) in enumerate(sorted_probs[:5]):  # 상위 5개만 표시
+            # 모든 패턴 표시
+            for i, (pattern, prob) in enumerate(sorted_probs):
                 if pattern == pattern_class:
                     info_text += f"• <b>{pattern}</b>: {prob:.2%} ← <span style='color: {confidence_color};'>선택됨</span><br>"
                 else:
                     info_text += f"• {pattern}: {prob:.2%}<br>"
-            
-            if len(sorted_probs) > 5:
-                info_text += f"... (기타 {len(sorted_probs) - 5}개 패턴)<br>"
             
             self.pattern_info_text.setText(info_text)
             
@@ -516,17 +532,26 @@ class MainWindow(QMainWindow):
         for row, det in enumerate(detections):
             # Defect Type
             defect_type = det.get("class_name", "unknown")
-            self.detail_table.setItem(row, 0, QTableWidgetItem(str(defect_type)))
+            item_type = QTableWidgetItem(str(defect_type))
+            item_type.setTextAlignment(Qt.AlignCenter)
+            self.detail_table.setItem(row, 0, item_type)
             
             # Position
             center = det.get("center", (0, 0))
             pos_str = f"({int(center[0])}, {int(center[1])})"
-            self.detail_table.setItem(row, 1, QTableWidgetItem(pos_str))
+            item_pos = QTableWidgetItem(pos_str)
+            item_pos.setTextAlignment(Qt.AlignCenter)
+            self.detail_table.setItem(row, 1, item_pos)
             
             # Confidence
             conf = det.get("confidence", 0.0)
             conf_str = f"{conf:.3f}"
-            self.detail_table.setItem(row, 2, QTableWidgetItem(conf_str))
+            item_conf = QTableWidgetItem(conf_str)
+            item_conf.setTextAlignment(Qt.AlignCenter)
+            self.detail_table.setItem(row, 2, item_conf)
+        
+        # 테이블 크기 조정 (텍스트가 잘리지 않도록)
+        self.detail_table.resizeColumnsToContents()
         
         # 버튼 활성화
         self.analyze_button.setEnabled(True)

@@ -16,6 +16,38 @@ from utils.visualization import create_visualization
 
 import config
 
+# 이미지를 직접 wafer-map으로 변환하는 함수 (none/near-full용)
+def image_to_wafer_map(
+    image: np.ndarray,
+    grid_size: tuple = (config.GRID_HEIGHT, config.GRID_WIDTH)
+) -> np.ndarray:
+    """
+    이미지를 직접 wafer-map 그리드로 변환
+    박스 라벨링이 없는 none/near-full에 사용
+    
+    Args:
+        image: 입력 이미지 (BGR)
+        grid_size: 그리드 크기 (height, width)
+    
+    Returns:
+        2D numpy 배열 (grid_height, grid_width), 0-1 범위
+    """
+    grid_h, grid_w = grid_size
+    
+    # 그레이스케일로 변환
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image
+    
+    # 그리드 크기로 리사이즈
+    resized = cv2.resize(gray, (grid_w, grid_h), interpolation=cv2.INTER_AREA)
+    
+    # 0-1 범위로 정규화
+    wafer_map = resized.astype(np.float32) / 255.0
+    
+    return wafer_map
+
 
 class DefectAnalysisPipeline:
     """불량 분석 파이프라인"""
@@ -79,19 +111,67 @@ class DefectAnalysisPipeline:
         img_h, img_w = orig_image.shape[:2]
         image_size = (img_w, img_h)
         
-        # Step A: YOLO 불량 검출
+        # 작은 이미지를 500x500으로 확대 (GUI 표시 크기)
+        DISPLAY_SIZE = 500
+        scale_x = scale_y = 1.0
+        display_image = orig_image.copy()
+        
+        if img_w < DISPLAY_SIZE or img_h < DISPLAY_SIZE:
+            # 확대 비율 계산
+            scale_x = DISPLAY_SIZE / img_w
+            scale_y = DISPLAY_SIZE / img_h
+            # 정확히 500x500으로 리사이즈
+            display_image = cv2.resize(orig_image, (DISPLAY_SIZE, DISPLAY_SIZE), interpolation=cv2.INTER_CUBIC)
+            print(f"이미지 확대: {img_w}x{img_h} → {DISPLAY_SIZE}x{DISPLAY_SIZE}")
+        
+        # Step A: YOLO 불량 검출 (원본 이미지에서 검출)
         detections = self.yolo_detector.detect(orig_image, conf_threshold=conf_threshold)
         print(f"검출된 불량 개수: {len(detections)}")
         
+        # 확대된 이미지에 맞게 검출 좌표 스케일링
+        if scale_x != 1.0 or scale_y != 1.0:
+            scaled_detections = []
+            for det in detections:
+                scaled_det = det.copy()
+                # bbox 좌표 스케일링
+                if "bbox" in scaled_det:
+                    x1, y1, x2, y2 = scaled_det["bbox"]
+                    scaled_det["bbox"] = [
+                        x1 * scale_x, y1 * scale_y,
+                        x2 * scale_x, y2 * scale_y
+                    ]
+                # center 좌표 스케일링
+                if "center" in scaled_det:
+                    cx, cy = scaled_det["center"]
+                    scaled_det["center"] = (cx * scale_x, cy * scale_y)
+                # area 스케일링
+                if "area" in scaled_det:
+                    scaled_det["area"] = scaled_det["area"] * scale_x * scale_y
+                scaled_detections.append(scaled_det)
+            detections = scaled_detections
+        
         # Step B: Wafer map 생성
-        wafer_map = detections_to_wafer_map(
+        # 검출이 없거나 매우 적을 때 (none/near-full 가능성) 이미지를 직접 wafer-map으로 변환
+        DETECTION_THRESHOLD = 2  # 검출 개수 임계값
+        use_direct_image = len(detections) <= DETECTION_THRESHOLD
+        
+        if use_direct_image:
+            # 이미지를 직접 wafer-map으로 변환 (none/near-full 처리)
+            print(f"검출이 적어 이미지를 직접 wafer-map으로 변환 (none/near-full 가능성)")
+            wafer_map = image_to_wafer_map(
+                display_image if scale_x != 1.0 else orig_image,
+                grid_size=(config.GRID_HEIGHT, config.GRID_WIDTH)
+            )
+        else:
+            # YOLO 검출 결과로 wafer-map 생성 (일반 패턴)
+            wafer_map = detections_to_wafer_map(
             detections,
-            image_size,
+            (DISPLAY_SIZE, DISPLAY_SIZE) if scale_x != 1.0 else image_size,
             grid_size=(config.GRID_HEIGHT, config.GRID_WIDTH)
         )
         print(f"Wafer map 생성 완료: {wafer_map.shape}")
         
-        # Step C: 패턴 분류
+        # Step C: 패턴 분류 (학습된 모델 사용)
         pattern_result = self.pattern_classifier.predict(
             wafer_map,
             return_probabilities=True
@@ -108,11 +188,11 @@ class DefectAnalysisPipeline:
         
         print(f"분류된 패턴: {pattern_class} (신뢰도: {pattern_confidence:.2f})")
         
-        # Step D: 시각화 (실제 검출 좌표 기반)
+        # Step D: 시각화 (확대된 이미지에 스케일링된 좌표로 시각화)
         # YOLO 학습 후에는 show_bbox=True로 설정하여 정확한 박스 표시
         vis_image = create_visualization(
-            orig_image,
-            detections,
+            display_image,  # 확대된 이미지 사용
+            detections,  # 스케일링된 검출 결과
             pattern_class,
             pattern_confidence,
             show_bbox=True,  # 학습된 YOLO 모델 사용 시 bbox 표시
@@ -123,7 +203,9 @@ class DefectAnalysisPipeline:
         
         analysis_time = time.time() - start_time
         
-        # 결과 반환
+        # 결과 반환 (확대된 이미지 크기 반환)
+        display_size = (DISPLAY_SIZE, DISPLAY_SIZE) if scale_x != 1.0 else image_size
+        
         return {
             "class_label": pattern_class,
             "confidence": pattern_confidence,
@@ -131,7 +213,7 @@ class DefectAnalysisPipeline:
             "vis_image": vis_image,
             "detections": detections,
             "analysis_time": analysis_time,
-            "image_size": image_size,
+            "image_size": display_size,  # 확대된 이미지 크기 반환
             "wafer_map": wafer_map,
             "pattern_probabilities": pattern_probs
         }

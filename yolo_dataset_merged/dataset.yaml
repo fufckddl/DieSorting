@@ -1,0 +1,7 @@
+path: C:\Users\dlckd\OneDrive\바탕 화면\반도체 졸업프로젝트\Diesorting\yolo_dataset_merged
+train: train/images
+val: val/images
+test: test/images
+names:
+  0: defect
+nc: 1
